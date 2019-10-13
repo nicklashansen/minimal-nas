@@ -25,10 +25,12 @@ class Controller(nn.Module):
         self.hidden_size = hidden_size
         self.epsilon = 0.8
         self.gamma = 1.0
+        self.beta = 0.01
         self.max_depth = 6
         self.clip_norm = 0
         self.log_probs = []
         self.actions = []
+        self.entropies = []
         self.reward = None
 
         self.index_to_action = {
@@ -44,7 +46,7 @@ class Controller(nn.Module):
             9: 'EOS'
         }
 
-        self.optimizer = optim.RMSprop(self.parameters(), lr=1e-2)
+        self.optimizer = optim.Adam(self.parameters(), lr=1e-2)
 
 
     def forward(self, x, h):
@@ -64,30 +66,48 @@ class Controller(nn.Module):
         logits, new_state = self(torch.zeros(self.num_actions), state)
         
         idx = torch.distributions.Categorical(logits=logits).sample()
-        log_probs = logits-torch.logsumexp(logits, dim=0)
+        probs = F.softmax(logits, dim=-1)
+        log_probs = torch.log(probs)
 
         action = self.index_to_action[int(idx)]
         self.actions.append(action)
+
+        entropy = -(log_probs * probs).sum(dim=-1)
+        self.entropies.append(entropy)
+
+        if action == 'EOS' and len(self.actions) <= 2:
+            self.reward -= 1
+        elif len(self.actions) >= 2 and isinstance(self.actions[-1], int) and isinstance(self.actions[-2], int):
+            self.reward -= 0.1
+        elif len(self.actions) >= 2 and isinstance(self.actions[-1], str) and isinstance(self.actions[-2], str) and action != 'EOS':
+            self.reward -= 0.1
 
         terminate = action == 'EOS' or len(self.actions) == self.max_depth
 
         return log_probs[idx], new_state, terminate
 
 
-    def generate_rollout(self, iter_train, iter_dev):
+    def generate_rollout(self, iter_train, iter_dev, verbose=False):
+        self.log_probs = []
+        self.actions = []
+        self.entropies = []
+        self.reward = None
+
         state = torch.zeros(self.hidden_size)
         terminated = False
+        self.reward = 0
 
         while not terminated:
-            log_probs, state, terminated = self.step(state)
-            self.log_probs.append(log_probs)
+            log_prob, state, terminated = self.step(state)
+            self.log_probs.append(log_prob)
 
-        print('\nGenerated network:')
-        print(self.actions)
+        if verbose:
+            print('\nGenerated network:')
+            print(self.actions)
 
         net = Net(self.actions)
         accuracy = net.fit(iter_train, iter_dev)
-        self.reward = accuracy - 1
+        self.reward += accuracy
 
         return self.reward
 
@@ -98,7 +118,9 @@ class Controller(nn.Module):
 
         for i in reversed(range(len(self.log_probs))):
             G = self.gamma * G
-            loss = loss - (self.log_probs[i]*Variable(G))
+            loss = loss - (self.log_probs[i]*Variable(G)) - self.beta * self.entropies[i]
+
+        loss /= len(self.log_probs)
         
         self.optimizer.zero_grad()
         loss.backward()
@@ -107,9 +129,5 @@ class Controller(nn.Module):
             nn.utils.clip_grad_norm_(self.parameters(), self.clip_norm)
 
         self.optimizer.step()
-
-        self.log_probs = []
-        self.actions = []
-        self.reward = None
 
         return float(loss.data.numpy())

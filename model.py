@@ -90,6 +90,4 @@ class Net(nn.Module):
                 if es_counter == patience:
                     break
 
-        print(f'ES after {epoch+1} epochs')
-
         return epoch_accuracy

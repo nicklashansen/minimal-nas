@@ -40,18 +40,23 @@ def load_dataset(p_val=0.1, p_test=0.2):
 if __name__ == '__main__':
     dl_train, dl_dev, dl_test = load_dataset()
     controller = Controller()
-    num_rollouts = 1000
+    num_rollouts = 5000
 
     rewards = []
     losses = []
 
+    print('Training controller...')
+
     for i in range(num_rollouts):
         reward = controller.generate_rollout(dl_train, dl_dev)
         loss = controller.optimize()
-        print(f'Rollout {i+1}, reward: {reward}, loss: {loss}')
-
+        controller.beta *= 0.99
+        
         rewards.append(reward)
         losses.append(loss)
+
+        if i % 100 == 0 and i > 0:
+            print(f'Rollout {i}, mean reward: {np.mean(rewards[-100:])}, beta: {controller.beta}, loss: {np.mean(losses[-100:])}')
 
     with open('rewards_losses.pkl', 'wb') as handle:
         pkl.dump((rewards, losses), handle, protocol=pkl.HIGHEST_PROTOCOL)
