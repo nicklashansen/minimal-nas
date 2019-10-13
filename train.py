@@ -60,8 +60,3 @@ if __name__ == '__main__':
 
     with open('rewards_losses.pkl', 'wb') as handle:
         pkl.dump((rewards, losses), handle, protocol=pkl.HIGHEST_PROTOCOL)
-
-    #plt.figure()
-    #plt.plot(range(len(rewards)), rewards)
-    #plt.plot(range(len(losses)), losses)
-    #plt.show()
